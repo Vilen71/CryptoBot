@@ -1,62 +1,33 @@
-const {Telegraf, Markup} = require('telegraf')
+const { Telegraf, Markup } = require("telegraf");
 
-const bot = new Telegraf('6212591235:AAHM9Zq2gsq-xVVrFFVnNBf3IU25bCL0CxU');
+const bot = new Telegraf("6212591235:AAHM9Zq2gsq-xVVrFFVnNBf3IU25bCL0CxU");
+const fetch = require("node-fetch");
 
 bot.start((ctx) => {
     const keyboard = Markup.keyboard([
-        ['BTC', 'ETH', 'LTC', 'MATIC', ],
-        ['TRX', 'FTM', 'LINK', 'AVAX', ],
-        ['XRP','ZEC'],
+        ['BTC', 'ETH', 'LTC', 'MATIC',],
+        ['TRX', 'FTM', 'LINK', 'AVAX',],
+        ['XRP', 'ZEC'],
     ])
 
     ctx.reply('Select a crypto currency:', keyboard)
 })
 
-let coinsArray = [];
-
 bot.hears(['BTC', 'ETH', 'LTC', 'XRP', 'MATIC', 'TRX', 'FTM', 'LINK', 'AVAX', 'ZEC'], async (ctx) => {
     const coin = ctx.message.text;
-
-        coinsArray.push(coin);
-        if (coinsArray.length > 3) {
-            coinsArray.shift();
-        }
-        const message = await ctx.reply('Loading...');
+    const message = await ctx.reply('Loading...');
+    getCoins(coin, message, ctx);
+    setInterval(async () => {
         getCoins(coin, message, ctx);
-        setInterval(async () => {
-            getCoins(coin, message, ctx);
-        }, 5000);
+    }, 5000);
 });
 
 async function getCoins(coin, message, ctx) {
     try {
-        const binancePrice = await getBinanceBtcPrice(coin);
-        const binanceUSPrice = await getBinanceUsBtcPrice(coin);
-        const bybitPrice = await getBybitBtcPrice(coin);
-        const kuCoinPrice = await getKucoinBtcPrice(coin);
+        const prices = await getPrices(coin);
+        const newMessage = generateMessage(prices, coin);
 
-        const prices = [
-            { exchange: 'KuCoin', price: kuCoinPrice },
-            { exchange: 'Binance US', price: binanceUSPrice },
-            { exchange: 'Bybit', price: bybitPrice },
-            { exchange: 'Binance', price: binancePrice },
-        ];
-
-        const priceValues = prices.map(({ price }) => price);
-        const maxPrice = Math.max(...priceValues);
-        const minPrice = Math.min(...priceValues);
-        const spread = Math.floor(((maxPrice - minPrice) / minPrice) * 10000) / 100;
-
-        prices.sort((a, b) => b.price - a.price);
-
-        const newMessage =
-            `${coin}USDT\n` +
-            '===================\n\n' +
-            prices.map(({ exchange, price }, index) => `${index + 1}. ${exchange}:  $${price}`).join('\n\n') +
-            '\n\n===================\n' +
-            `Spread: ${spread}%`;
-
-        if (newMessage !== message.text ) {
+        if (newMessage !== message.text) {
             await ctx.telegram.editMessageText(ctx.chat.id, message.message_id, null, newMessage);
         }
     } catch (err) {
@@ -64,11 +35,35 @@ async function getCoins(coin, message, ctx) {
     }
 }
 
+function generateMessage(prices, coin) {
+    const priceValues = prices.map(({ price }) => price);
+    const maxPrice = Math.max(...priceValues);
+    const minPrice = Math.min(...priceValues);
+    const spread = Math.floor(((maxPrice - minPrice) / minPrice) * 10000) / 100;
 
-/*bot.hears('ETH Price', async (ctx) => {
-    const price = await getBinanceEthPrice();
-    await ctx.reply(`The current price of ETH is ${price}`);
-});*/
+    prices.sort((a, b) => b.price - a.price);
+
+    const newMessage =
+        `${coin}USDT\n` +
+        '===================\n\n' +
+        prices.map(({ exchange, price }, index) => `${index + 1}. ${exchange}:  $${price}`).join('\n\n') +
+        '\n\n===================\n' +
+        `Spread: ${spread}%`;
+
+    return newMessage;
+}
+
+async function getPrices(coin) {
+    const binanceUSPrice = await getBinanceUsBtcPrice(coin);
+    const bybitPrice = await getBybitBtcPrice(coin);
+    const kuCoinPrice = await getKucoinBtcPrice(coin);
+
+    return [
+        { exchange: 'KuCoin', price: kuCoinPrice },
+        { exchange: 'Binance US', price: binanceUSPrice },
+        { exchange: 'Bybit', price: bybitPrice },
+    ];
+}
 
 async function getBinanceBtcPrice(coin) {
     try {
@@ -124,28 +119,6 @@ async function getKucoinBtcPrice(coin) {
         throw error;
     }
 }
-
-
-// bot.command('start', async (ctx) => {
-//     const message = await ctx.reply('Loading...');
-// //
-//     setInterval(async () => {
-//         const binancePrice = await getBinanceBtcPrice();
-//         const binanceUSPrice = await getBinanceUsBtcPrice();
-//         const bybitPrice = await getBybitBtcPrice();
-//         const kuCoinPrice = await getKucoinBtcPrice();
-//
-//         const prices = [binancePrice, binanceUSPrice, bybitPrice, kuCoinPrice];
-//         prices.sort((a, b) => b - a);
-//
-//         const newMessage = `Binance: ${prices[0]}\nBinanceUS: ${prices[1]}\nBybit: ${prices[2]}\nKuCoin: ${prices[3]}`;
-//
-//         if (newMessage !== message.text) {
-//             await ctx.telegram.editMessageText(ctx.chat.id, message.message_id, null, newMessage);
-//         }
-//     }, 3000); // обновление каждые 3 секундs
-// });
-
 
 bot.command('restart', (ctx) => {
     ctx.reply('Bot is restarting...');
