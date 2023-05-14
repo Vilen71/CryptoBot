@@ -1,8 +1,9 @@
 const { Telegraf, Markup } = require("telegraf");
 
 const bot = new Telegraf("6212591235:AAHM9Zq2gsq-xVVrFFVnNBf3IU25bCL0CxU");
-bot.setMaxListeners(20);
 const fetch = require("node-fetch");
+const http = require('http');
+let lastCoins = [];
 
 bot.start((ctx) => {
     const keyboard = Markup.keyboard([
@@ -13,12 +14,9 @@ bot.start((ctx) => {
 
     ctx.reply("Select a crypto currency:", keyboard);
 });
-
-let lastCoins = [];
-
 bot.hears(['BTC', 'ETH', 'LTC', 'XRP', 'MATIC', 'TRX', 'FTM', 'LINK', 'AVAX', 'ZEC'], async (ctx) => {
     const coin = ctx.message.text;
-    const message = await ctx.reply(`Loading ${coin} price...`);
+    const message = await ctx.reply(`Loading prices for ${coin}...`);
     getCoins(coin, message, ctx);
 });
 
@@ -26,45 +24,63 @@ async function getCoins(coin, message, ctx) {
     try {
         const prices = await getPrices(coin);
         const newMessage = generateMessage(prices, coin);
-
-        lastCoins = lastCoins.filter(lastCoin => lastCoin.coin !== coin);
-        lastCoins.push({
-            coin: coin,
-            message: message,
-            text: newMessage
-        });
-
-        if (lastCoins.length > 2) {
-            const { message: oldMessage } = lastCoins.shift();
-            clearInterval(oldMessage.intervalId);
-        }
-
-        const intervalId = setInterval(async () => {
-            try {
-                const prices = await getPrices(coin);
-                const newMessage = generateMessage(prices, coin);
-
-                const lastCoin = lastCoins.find(lastCoin => lastCoin.coin === coin);
-                if (lastCoin && lastCoin.text !== newMessage) {
-                    await ctx.telegram.editMessageText(ctx.chat.id, lastCoin.message.message_id, null, newMessage);
-                }
-
-                lastCoin.text = newMessage;
-            } catch (err) {
-                console.error(err);
-            }
-        }, 5000);
-
-        const lastCoin = lastCoins.find(lastCoin => lastCoin.coin === coin);
-        lastCoin.message.intervalId = intervalId;
-
-        setTimeout(() => {
-            clearInterval(intervalId);
-            lastCoins = lastCoins.filter(lastCoin => lastCoin.coin !== coin);
-        }, 70000);
+        await ctx.telegram.editMessageText(
+            message.chat.id,
+            message.message_id,
+            null,
+            newMessage
+        );
+        const lastCoin = {
+            coin,
+            message,
+            text: newMessage,
+            intervalId: null
+        };
+        updateCoins(lastCoin);
+        startCoinUpdate(lastCoin, ctx);
+        scheduleCoinRemoval(lastCoin);
     } catch (err) {
         console.error(err);
     }
+}
+
+
+function updateCoins(coin) {
+    lastCoins = lastCoins.filter(lastCoin => lastCoin.coin !== coin.coin);
+    lastCoins.push(coin);
+    if (lastCoins.length > 2) {
+        const { message: oldMessage } = lastCoins.shift();
+        clearInterval(oldMessage.intervalId);
+    }
+}
+
+async function startCoinUpdate(coin, ctx) {
+    const intervalId = setInterval(async () => {
+        try {
+            const prices = await getPrices(coin.coin);
+            const newMessage = generateMessage(prices, coin.coin);
+            const lastCoin = lastCoins.find(lastCoin => lastCoin.coin === coin.coin);
+            if (lastCoin && lastCoin.text !== newMessage) {
+                await ctx.telegram.editMessageText(
+                    ctx.chat.id,
+                    lastCoin.message.message_id,
+                    null,
+                    newMessage
+                );
+                lastCoin.text = newMessage;
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }, 5000);
+    coin.intervalId = intervalId;
+}
+
+function scheduleCoinRemoval(coin) {
+    setTimeout(() => {
+        clearInterval(coin.intervalId);
+        lastCoins = lastCoins.filter(lastCoin => lastCoin.coin !== coin.coin);
+    }, 70000);
 }
 
 function generateMessage(prices, coin) {
@@ -180,14 +196,14 @@ bot.catch((err) => {
 
 bot.command('reset', (ctx) => {
     resetPrices(lastCoins);
-    ctx.reply('All price updates have been reset.');
+    ctx.reply('All prices updates have been reset.');
 });
 
 function resetPrices(lastCoins) {
     for (const coin of lastCoins) {
         clearInterval(coin.message.intervalId);
     }
-    lastCoins = [];
+    lastCoins.length = 0; // очищаем массив
 }
 
 bot.launch();
