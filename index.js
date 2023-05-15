@@ -1,46 +1,80 @@
-const { Telegraf, Markup } = require("telegraf");
+const {Telegraf, Markup} = require("telegraf");
 
 const bot = new Telegraf("6212591235:AAHM9Zq2gsq-xVVrFFVnNBf3IU25bCL0CxU");
 const fetch = require("node-fetch");
 const http = require('http');
 let lastCoins = [];
 
+
 bot.start((ctx) => {
     const keyboard = Markup.keyboard([
-        ["BTC", "ETH", "LTC", "MATIC"],
-        ["TRX", "FTM", "LINK", "AVAX"],
-        ["XRP", "ZEC"],
+        ['BTC', 'ETH', 'TRX', 'MATIC'],
+        ['ZEC', 'FTM', 'LINK', 'AVAX'],
+        ['Choose a coin'],
     ]);
 
     ctx.reply("Select a crypto currency:", keyboard);
 });
-bot.hears(['BTC', 'ETH', 'LTC', 'XRP', 'MATIC', 'TRX', 'FTM', 'LINK', 'AVAX', 'ZEC'], async (ctx) => {
-    const coin = ctx.message.text;
-    const message = await ctx.reply(`Loading prices for ${coin}...`);
-    getCoins(coin, message, ctx);
+
+bot.hears('Choose a coin', (ctx) => {
+    ctx.reply('Please enter the name of the coin you want to check prices for. \n\nExample: LTC, SOL, CAKE');
+});
+
+bot.command('reset', (ctx) => {
+    resetPrices(lastCoins);
+    ctx.reply('All prices updates have been reset.');
+});
+
+bot.on('text', async (ctx) => {
+    const messageText = ctx.message.text.trim();
+
+    if (!messageText.startsWith('/')) {
+        const text = messageText.toUpperCase();
+        const message = await ctx.reply(`Loading prices for ${text}...`);
+        await getCoins(text, message, ctx);
+    }
 });
 
 async function getCoins(coin, message, ctx) {
     try {
         const prices = await getPrices(coin);
+
+        if (Object.keys(prices).length === 0) {
+            throw new Error(`Could not find prices for ${coin}`);
+        }
+
         const newMessage = generateMessage(prices, coin);
+
         await ctx.telegram.editMessageText(
             message.chat.id,
             message.message_id,
             null,
             newMessage
         );
+
         const lastCoin = {
             coin,
             message,
             text: newMessage,
             intervalId: null
         };
+
         updateCoins(lastCoin);
         startCoinUpdate(lastCoin, ctx);
         scheduleCoinRemoval(lastCoin);
     } catch (err) {
         console.error(err);
+
+        const errorMessages = [`Oops, looks like I'm having trouble fetching prices for ${coin} 😬`, `Sorry, ${coin} is feeling a little shy today and hiding its prices from me 😶`, `Well, this is awkward - I couldn't find any prices for ${coin} 🤐`, `Houston, we have a problem...I couldn't fetch any prices for ${coin} 🚀`, `Looks like ${coin} took a break from the market and didn't tell me about it 🏖️`, `Sorry, I'm drawing a blank on ${coin} prices right now 🤯`, `Hmm, it seems like ${coin} prices are playing hide and seek with me 🙈`, `I'm starting to think ${coin} prices might be an urban legend 🤔`, `Did someone say ${coin}? Sorry, I don't have any prices to report 🤷‍♂️`, `I asked nicely, but ${coin} didn't want to share its prices with us 🙅‍♂️`, `I think ${coin} prices are in hiding...or maybe they just went on vacation 🏝️`, `Sorry, I couldn't find any prices for ${coin} - maybe they're on a coffee break ☕`, `I'm not sure what's going on, but ${coin} prices seem to be in hiding 🕵️`, `I have a feeling ${coin} prices are going incognito on me 🕵️‍♂️`, `Looks like ${coin} prices are off on a secret mission...I'll keep searching 👀`, `I don't want to point fingers, but I have a hunch that ${coin} prices are avoiding me 🤨`, `It's like ${coin} prices disappeared into thin air...I'll keep investigating 👨‍💼`, `Hmm, something tells me ${coin} prices are feeling camera shy today 📷`, `I'm stumped - no luck finding any prices for ${coin} 🤷‍♀️`];
+
+        const randomErrorMessage = errorMessages[Math.floor(Math.random() * errorMessages.length)];
+
+        await ctx.telegram.editMessageText(
+            message.chat.id,
+            message.message_id,
+            null,
+            randomErrorMessage
+        );
     }
 }
 
@@ -49,7 +83,7 @@ function updateCoins(coin) {
     lastCoins = lastCoins.filter(lastCoin => lastCoin.coin !== coin.coin);
     lastCoins.push(coin);
     if (lastCoins.length > 2) {
-        const { message: oldMessage } = lastCoins.shift();
+        const {message: oldMessage} = lastCoins.shift();
         clearInterval(oldMessage.intervalId);
     }
 }
@@ -72,19 +106,12 @@ async function startCoinUpdate(coin, ctx) {
         } catch (err) {
             console.error(err);
         }
-    }, 5000);
+    }, 1500);
     coin.intervalId = intervalId;
 }
 
-function scheduleCoinRemoval(coin) {
-    setTimeout(() => {
-        clearInterval(coin.intervalId);
-        lastCoins = lastCoins.filter(lastCoin => lastCoin.coin !== coin.coin);
-    }, 70000);
-}
-
 function generateMessage(prices, coin) {
-    const priceValues = prices.map(({ price }) => price);
+    const priceValues = prices.map(({price}) => price);
     const maxPrice = Math.max(...priceValues);
     const minPrice = Math.min(...priceValues);
     const spread = Math.floor(((maxPrice - minPrice) / minPrice) * 10000) / 100;
@@ -96,7 +123,7 @@ function generateMessage(prices, coin) {
         "===================\n\n" +
         prices
             .map(
-                ({ exchange, price }, index) => `${index + 1}. ${exchange}:  $${price}`
+                ({exchange, price}, index) => `${index + 1}. ${exchange}:  $${price}`
             )
             .join("\n\n") +
         "\n\n===================\n" +
@@ -105,15 +132,24 @@ function generateMessage(prices, coin) {
     return newMessage;
 }
 
+function scheduleCoinRemoval(coin) {
+    setTimeout(() => {
+        clearInterval(coin.intervalId);
+        lastCoins = lastCoins.filter(lastCoin => lastCoin.coin !== coin.coin);
+    }, 90000);
+}
+
 async function getPrices(coin) {
+    const binancePrice = await getBinanceBtcPrice(coin);
     const binanceUSPrice = await getBinanceUsBtcPrice(coin);
     const bybitPrice = await getBybitBtcPrice(coin);
     const kuCoinPrice = await getKucoinBtcPrice(coin);
 
     return [
-        { exchange: "KuCoin", price: kuCoinPrice },
-        { exchange: "Binance US", price: binanceUSPrice },
-        { exchange: "Bybit", price: bybitPrice },
+        {exchange: "Binance", price: binancePrice},
+        {exchange: "KuCoin", price: kuCoinPrice},
+        {exchange: "Binance US", price: binanceUSPrice},
+        {exchange: "Bybit", price: bybitPrice},
     ];
 }
 
@@ -123,10 +159,11 @@ async function getBinanceBtcPrice(coin) {
             `https://api.binance.com/api/v3/ticker/price?symbol=${coin}USDT`
         );
         const data = await response.json();
+        console.log(+data.price);
         return +data.price;
     } catch (error) {
-        console.error(error);
-        throw new Error("Failed to get Binance BTC price");
+        console.error(`Failed to get Binance ${coin} price`);
+        throw new Error(`Failed to get Binance ${coin} price`);
     }
 }
 
@@ -141,7 +178,7 @@ async function getBinanceUsBtcPrice(coin) {
         const data = await response.json();
         return parseFloat(data.price);
     } catch (error) {
-        console.error(error);
+        console.error('Error from Binance US');
         return null;
     }
 }
@@ -161,7 +198,7 @@ async function getBybitBtcPrice(coin) {
         }
     } catch (error) {
         console.error(
-            `Error getting price for ${coin} from Bybit: ${error.message}`
+            `Error getting price for ${coin} from Bybit:`
         );
         return null;
     }
@@ -179,7 +216,7 @@ async function getKucoinBtcPrice(coin) {
             throw new Error("Price not found in API response");
         }
     } catch (error) {
-        console.error(`Error fetching price from Kucoin API: ${error.message}`);
+        console.error(`Error fetching price from Kucoin API: `);
         throw error;
     }
 }
@@ -194,10 +231,6 @@ bot.catch((err) => {
     console.log("Error: аф", err);
 });
 
-bot.command('reset', (ctx) => {
-    resetPrices(lastCoins);
-    ctx.reply('All prices updates have been reset.');
-});
 
 function resetPrices(lastCoins) {
     for (const coin of lastCoins) {
